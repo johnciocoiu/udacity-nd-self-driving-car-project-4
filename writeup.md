@@ -4,13 +4,13 @@
 *The goals / steps of this project are the following:*
 
 1. Compute the camera calibration matrix and distortion coefficients given a set of chessboard images.
-- Apply a distortion correction to raw images.
-- Apply a perspective transform to rectify binary image ("birds-eye view").
-- Use color transforms, gradients, etc., to create a thresholded binary image.
-- Detect lane pixels and fit to find the lane boundary.
-- Determine the curvature of the lane and vehicle position with respect to center.
-- Warp the detected lane boundaries back onto the original image.
-- Output visual display of the lane boundaries and numerical estimation of lane curvature and vehicle position.
+2. Apply a distortion correction to raw images.
+3. Apply a perspective transform to rectify binary image ("birds-eye view").
+4. Use color transforms, gradients, etc., to create a thresholded binary image.
+5. Detect lane pixels and fit to find the lane boundary.
+6. Determine the curvature of the lane and vehicle position with respect to center.
+7. Warp the detected lane boundaries back onto the original image.
+8. Output visual display of the lane boundaries and numerical estimation of lane curvature and vehicle position.
 
 In this writeup document, the chapters are the goals with the same numbering as noted above. The code is also included and the images are direct output of the code.
 
@@ -269,10 +269,9 @@ def combine_binary(sxbinary, s_binary):
 
 In the `find_lines()` function, I managed to find the lines using the binary image. The function works as follows:
 1. Split the image in two, and find the lines at the base (bottom of the screen) using the peaks of the histogram. **Note** that I've got rid of the 200 pixels on both sides, because at the base there will never be a lane-line (only when you cross those lines, but that is not happening in this video).
-2. In case you search the line for the first time: use sliding windows to measure the slope of the line for every X pixels (in this case X is height/9). Get those 'points' and add them to `left_lane_inds` and `right_lane_inds` lists.
-3. Fit a line using these indexes.
-4. In case you have the indexes of last iteration, use them in stead of the sliding window to fit a line.
-
+2. In case you search the line for the first time: use sliding windows to measure the slope of the line for every X pixels (in this case X is height/9). Get those 'points' and add them to `left_lane_inds` and `right_lane_inds` lists. Fit a line using these indexes.
+3. In case there is a previously detected line, use these lines to find the line in the new frame.
+4. Set all variables in the line objects so they could be reused.
 
 ```python
 def find_lines(binary_warped, left_line, right_line):
@@ -660,7 +659,7 @@ project_clip = clip.fl_image(process_frame)
 ## Possible improvements
 
 1. Now just the previous line-fit is used to draw the lines, this could be improved using more then just one previous frame. 
-- Use a sanity check to see whether the fitted lines are realistic, if not, reset the `line.detected` and calculate the line again without any knowledge or with the knowledge of the fit of even more frames ago.
-- The distance between both lines could be used, because this will always be 3.7 meters (conv to pixels) and won't change fast between frames.
-- The car stays inside one lane, when changing lanes, the system needs to be improved.
-- Separate lane-lines for every detection. In case one line is detected and the other isn't, you almost 'know' where that other in will be.
+2. Use a sanity check to see whether the fitted lines are realistic, if not, reset the `line.detected` and calculate the line again without any knowledge or with the knowledge of the fit of even more frames ago.
+3. The distance between both lines could be used, because this will always be 3.7 meters (conv to pixels) and won't change fast between frames.
+4. The car stays inside one lane, when changing lanes, the system needs to be improved.
+5. Separate lane-lines for every detection. In case one line is detected and the other isn't, you almost 'know' where that other in will be.
