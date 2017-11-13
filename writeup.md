@@ -56,12 +56,12 @@ plt.imshow(img)
 
 
 
-    <matplotlib.image.AxesImage at 0x7f44dcf76208>
+    <matplotlib.image.AxesImage at 0x7f53c48d06a0>
 
 
 
 
-![png](images/output_5_1.png)
+![png](output_5_1.png)
 
 
 
@@ -125,12 +125,12 @@ axarr[1].imshow(undistort(img))
 
 
 
-    <matplotlib.image.AxesImage at 0x7f44dc03dda0>
+    <matplotlib.image.AxesImage at 0x7f53c481cb70>
 
 
 
 
-![png](images/output_10_1.png)
+![png](output_10_1.png)
 
 
 To demonstrate this step, I will describe how I apply the distortion correction to one of the test images like this one: 
@@ -149,12 +149,12 @@ axarr[1].imshow(undistort(img))
 
 
 
-    <matplotlib.image.AxesImage at 0x7f44dc191710>
+    <matplotlib.image.AxesImage at 0x7f53c473beb8>
 
 
 
 
-![png](images/output_12_1.png)
+![png](output_12_1.png)
 
 
 ## 3. Perspective transform
@@ -192,6 +192,8 @@ I used a combination of color and gradient thresholds to generate a binary image
 - Sobel maginitude threshold
 - Sobel directional threshold
 - Selection of S-color channel from HLS color space
+- Selection of L-color channel from LUV color space
+- Selection of B-color channel from LAB color space
 
 All these functions are added to the `pipeline`, which can be found in some cells below.
 
@@ -252,7 +254,26 @@ def hls_select(img, thresh=(0, 255)):
     binary_output[(s_channel > thresh[0]) & (s_channel <= thresh[1])] = 1
     return binary_output
 
+# Define a function that thresholds the L-channel of LUV
+def luv_select(img, thresh=(0, 255)):
+    luv = cv2.cvtColor(img, cv2.COLOR_RGB2Luv)
+    l_channel = luv[:,:,0]
+    binary_output = np.zeros_like(l_channel)
+    binary_output[(l_channel > thresh[0]) & (l_channel <= thresh[1])] = 1
+    return binary_output
 
+# Define a function that thresholds the B-channel of LAB
+def lab_select(img, thresh=(0, 255)):
+    lab = cv2.cvtColor(img, cv2.COLOR_RGB2Lab)
+    b_channel = lab[:,:,2]
+    binary_output = np.zeros_like(b_channel)
+    binary_output[(b_channel > thresh[0]) & (b_channel <= thresh[1])] = 1
+    return binary_output
+
+def combine_color_binaries(s_hls, l_luv, b_lab):
+    combined = np.zeros_like(s_hls)
+    combined[(s_hls == 1) | (l_luv == 1) | (b_lab == 1)] = 1
+    return combined
 ```
 
 ### Combining gradient and color
@@ -273,9 +294,11 @@ In the `find_lines()` function, I managed to find the lines using the binary ima
 3. In case there is a previously detected line, use these lines to find the line in the new frame.
 4. Set all variables in the line objects so they could be reused.
 
+
+
 ```python
-def find_lines(binary_warped, left_line, right_line):
-    if not left_line.detected or not right_line.detected:
+def find_lines(binary_warped, left_line, right_line, using_previous):
+    if not using_previous:
         # Assuming you have created a warped binary image called "binary_warped"
         # Take a histogram of the bottom half of the image
         histogram = np.sum(binary_warped[int(binary_warped.shape[0]/2):,:], axis=0)
@@ -353,8 +376,8 @@ def find_lines(binary_warped, left_line, right_line):
     else:
         # Find pixels in same region as previous run
         
-        left_fit = left_line.current_fit
-        right_fit = right_line.current_fit 
+        left_fit = left_line.best_fit
+        right_fit = right_line.best_fit 
         
         nonzero = binary_warped.nonzero()
         nonzeroy = np.array(nonzero[0])
@@ -393,17 +416,13 @@ def find_lines(binary_warped, left_line, right_line):
     left_line.ally = lefty
     right_line.allx = rightx
     right_line.ally = righty
-
-    left_line.detected = True
-    right_line.detected = True
-   
 ```
 
 ## 6. Calculate offset and curve
 
 ### Offset calculations
 
-With the assumption of the US lane with of 3.7 meters, use the warped image to calculate the offset to the center.
+With the assumption of the US lane with of 3.7 meters, use the warped image to calculate the offset to the center. My own calculation indeed, and it works :).
 
 
 ```python
@@ -428,9 +447,13 @@ Calculate the curvature by calculating the curve of both lines in radians and th
 
 
 ```python
-def calculate_curvature(left_line, right_line):
-    left_fit = left_line.current_fit 
-    right_fit = right_line.current_fit
+def calculate_curvature(left_line, right_line, best_current):
+    if best_current is 'current':
+        left_fit = left_line.current_fit 
+        right_fit = right_line.current_fit
+    else:
+        left_fit = left_line.best_fit 
+        right_fit = right_line.best_fit
     
     leftx = left_line.allx 
     lefty = left_line.ally 
@@ -472,13 +495,17 @@ def draw_lane_field(image, warped, left_line, right_line):
     warp_zero = np.zeros_like(warped).astype(np.uint8)
     color_warp = np.dstack((warp_zero, warp_zero, warp_zero))
     
-    left_fit = left_line.current_fit
-    right_fit = right_line.current_fit
+    if left_line.detected and right_line.detected:
+        left_fit = left_line.current_fit 
+        right_fit = right_line.current_fit
+    else:
+        left_fit = left_line.best_fit 
+        right_fit = right_line.best_fit
     
     ploty = np.linspace(0, warped.shape[0]-1, warped.shape[0] )
     
-    left_fitx = left_line.recent_xfitted[-1]
-    right_fitx = right_line.recent_xfitted[-1]
+    left_fitx = left_line.best_xfitted
+    right_fitx = right_line.best_xfitted
     
     # Recast the x and y points into usable format for cv2.fillPoly()
     pts_left = np.array([np.transpose(np.vstack([left_fitx, ploty]))])
@@ -503,14 +530,15 @@ In this chapter every step from above is visualized. All the test images are tak
 ```python
 class Line():
     def __init__(self):
+        self.first = True
         # was the line detected in the last iteration?
         self.detected = False  
         # x values of the last n fits of the line
         self.recent_xfitted = [] 
         #average x values of the fitted line over the last n iterations
 #         self.bestx = None     
-        #polynomial coefficients averaged over the last n iterations
-#         self.best_fit = None  
+        #polynomial coefficients best fit
+        self.best_fit = None  
         #polynomial coefficients for the most recent fit
         self.current_fit = [np.array([False])]  
         #radius of curvature of the line in meters
@@ -523,7 +551,38 @@ class Line():
         self.allx = None  
         #y values for detected line pixels
         self.ally = None
+        
+        self.best_xfitted = None
     
+```
+
+
+```python
+def sanity_check(left_line, right_line):
+    # Are the two polynomials an appropriate distance apart based on the known width of a highway lane?
+    x_distances = abs(left_line.recent_xfitted[-1] - right_line.recent_xfitted[-1])
+    x_min = np.min(x_distances)
+    x_max = np.max(x_distances)
+    threshold = (550, 750)
+    if (x_min < threshold[0] or x_min > threshold[1] or x_max < threshold[0] or x_max > threshold[1]) :
+        return False
+    
+    # Do the two polynomials have same or similar curvature? THIS IS NOT WORKING CORRECTLY
+#     if abs(left_line.radius_of_curvature - right_line.radius_of_curvature) > 200:
+#         print("Curve diff: " + str(abs(left_line.radius_of_curvature - right_line.radius_of_curvature)))
+#         return False
+  
+    return True
+
+def set_lines_detected(left_line, right_line):
+    left_line.best_xfitted = left_line.recent_xfitted[-1]
+    right_line.best_xfitted = right_line.recent_xfitted[-1]
+
+    left_line.best_fit = left_line.current_fit
+    right_line.best_fit = right_line.current_fit
+
+    left_line.detected = True
+    right_line.detected = True
 ```
 
 ## Pipeline
@@ -531,9 +590,10 @@ class Line():
 - Undistort
 - Change perspective
 - Gradient (Sobel)
-- Color: convert to HLS and use S-channel
+- Color: convert to HLS and use S-channel, convert to LAB and use B-channel, convert to LUV and use L-channel.
 - Combine gradient and color
 - Find lines
+- Do sanity check
 - Put text on image
 - Draw lane field
 
@@ -551,28 +611,64 @@ def process_image(img, left_line, right_line):
     sobel_bin = combine_thresholds(gradx_bin, grady_bin, mag_bin, dir_bin)
     
     # Color
-    hls_binary = hls_select(perspective_image, thresh=(170, 255))
+    hls_binary = hls_select(perspective_image, thresh=(190, 255))
+    luv_binary = luv_select(perspective_image, thresh=(220, 255))
+    lab_binary = lab_select(perspective_image, thresh=(155, 200))
+
+    color_combined = combine_color_binaries(hls_binary, luv_binary, lab_binary)
     
     # Color and gradient
-    grad_color_bin = combine_binary(sobel_bin, hls_binary)
+    grad_color_bin = combine_binary(sobel_bin, color_combined)
     
-    find_lines(grad_color_bin, left_line, right_line)
+    # Find the lines based on previous lines or first time (with using_prev = false)
+    find_lines(grad_color_bin, left_line, right_line, not (right_line.first & left_line.first))
+    
+    # For first time, best fit is current fit
+    if right_line.first & left_line.first:
+        left_line.best_fit = left_line.current_fit
+        right_line.best_fit = right_line.current_fit
+        left_line.best_xfitted = left_line.recent_xfitted[-1]
+        right_line.best_xfitted = right_line.recent_xfitted[-1]
+        
+        # First time check is done
+        left_line.first = False
+        right_line.first = False
+        
+    # Calculate the current curvature for the sanity check
+    calculate_curvature(left_line, right_line, 'current')
+    
+    # Check whether the sanity is correct
+    sanity_check_correct = sanity_check(left_line, right_line)
+    
+    # If it is correct, fix the sanity, otherwise search for lines again
+    if sanity_check_correct:
+        set_lines_detected(left_line, right_line)
+    else:
+        # New search for lines
+        find_lines(grad_color_bin, left_line, right_line, False)
+        calculate_curvature(left_line, right_line, 'current')
+        
+        sanity_check_correct = sanity_check(left_line, right_line)
+        
+        if sanity_check_correct:
+            set_lines_detected(left_line, right_line)
+        
+    calculate_curvature(left_line, right_line, 'best')
     
     drawed_field, warp = draw_lane_field(undist_image, grad_color_bin, left_line, right_line)
     
     calculate_offset_in_m(warp, left_line, right_line)
     offset = left_line.line_base_pos - ((left_line.line_base_pos + right_line.line_base_pos)/2)
     
-    calculate_curvature(left_line, right_line)
-    
     mean_curve = np.mean([left_line.radius_of_curvature, right_line.radius_of_curvature])
-    mean_curve = 0.0 if mean_curve > 1200 else mean_curve
+    mean_curve = 0.0 if mean_curve > 1500 else mean_curve
      
     font = cv2.FONT_HERSHEY_SIMPLEX
-    result_offset = cv2.putText(drawed_field, str('Offset: {:.2f}m'.format(offset)) ,(20,70), font, 2, (255,255,255),5,cv2.LINE_AA)
-    result_curve = cv2.putText(drawed_field, str('Curve: {:.2f}m'.format(mean_curve)) ,(20,140), font, 2, (255,255,255),5,cv2.LINE_AA)
+    result_offset = cv2.putText(drawed_field, str('Offset: {:.2f}m'.format(offset)) ,(20,70), font, 2, (255,255,255), 5, cv2.LINE_AA)
+    curve_text = 'No curve measured' if mean_curve == 0.0 else str('Curve: {:.2f}m'.format(mean_curve)) 
+    result_curve = cv2.putText(drawed_field, curve_text,(20,140), font, 2, (255,255,255), 5, cv2.LINE_AA)
     
-    return undist_image, perspective_image, sobel_bin, hls_binary, grad_color_bin, drawed_field
+    return undist_image, perspective_image, sobel_bin, color_combined, grad_color_bin, drawed_field
 ```
 
 ## Pipeline on test images
@@ -592,7 +688,7 @@ for i, test_fname in enumerate(test_images):
     left_line = Line()
     right_line = Line()
 
-    undist, persp, sobel, hls, grad_color, drawed = process_image(test_image, left_line, right_line)
+    undist, persp, sobel, color, grad_color, drawed = process_image(test_image, left_line, right_line)
 
     if i == 0:
         axarr[i,0].set_title('Original')
@@ -607,7 +703,7 @@ for i, test_fname in enumerate(test_images):
     axarr[i,1].imshow(undist)
     axarr[i,2].imshow(persp)
     axarr[i,3].imshow(sobel, cmap='gray')
-    axarr[i,4].imshow(hls, cmap='gray')
+    axarr[i,4].imshow(color, cmap='gray')
     axarr[i,5].imshow(grad_color, cmap='gray')
     axarr[i,6].imshow(drawed)
     
@@ -615,7 +711,7 @@ for i, test_fname in enumerate(test_images):
 ```
 
 
-![png](images/output_36_0.png)
+![png](output_37_0.png)
 
 
 # Pipeline on video
@@ -627,7 +723,7 @@ Use the pipeline to create the lane on the video.
 # Rewrite image to frame processing
 
 def process_frame(image):
-    undist, persp, sobel, hls, grad_color, drawed = process_image(image, left_line, right_line)
+    undist, persp, sobel, color, grad_color, drawed = process_image(image, left_line, right_line)
     return drawed
 ```
 
@@ -646,20 +742,20 @@ project_clip = clip.fl_image(process_frame)
     [MoviePy] Writing video output_images/project_video.mp4
 
 
-    100%|█████████▉| 1260/1261 [04:07<00:00,  5.74it/s]
+    100%|█████████▉| 1260/1261 [04:19<00:00,  4.39it/s]
 
 
     [MoviePy] Done.
     [MoviePy] >>>> Video ready: output_images/project_video.mp4 
     
-    CPU times: user 15min 27s, sys: 9.78 s, total: 15min 37s
-    Wall time: 4min 7s
+    CPU times: user 16min 33s, sys: 10.7 s, total: 16min 43s
+    Wall time: 4min 20s
 
 
 ## Possible improvements
 
-1. Now just the previous line-fit is used to draw the lines, this could be improved using more then just one previous frame. 
-2. Use a sanity check to see whether the fitted lines are realistic, if not, reset the `line.detected` and calculate the line again without any knowledge or with the knowledge of the fit of even more frames ago.
-3. The distance between both lines could be used, because this will always be 3.7 meters (conv to pixels) and won't change fast between frames.
-4. The car stays inside one lane, when changing lanes, the system needs to be improved.
-5. Separate lane-lines for every detection. In case one line is detected and the other isn't, you almost 'know' where that other in will be.
+1. Use the sanity check to see whether the curve of the lines are realistic
+2. Use more info of previous frames
+3. The car stays inside one lane, when changing lanes, the system needs to be improved.
+4. Separate lane-lines for every detection. In case one line is detected and the other isn't, you almost 'know' where that other in will be.
+
