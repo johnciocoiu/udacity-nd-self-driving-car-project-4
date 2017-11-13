@@ -61,7 +61,7 @@ plt.imshow(img)
 
 
 
-![png](output_5_1.png)
+![png](images/output_5_1.png)
 
 
 
@@ -130,7 +130,7 @@ axarr[1].imshow(undistort(img))
 
 
 
-![png](output_10_1.png)
+![png](images/output_10_1.png)
 
 
 To demonstrate this step, I will describe how I apply the distortion correction to one of the test images like this one: 
@@ -154,7 +154,7 @@ axarr[1].imshow(undistort(img))
 
 
 
-![png](output_12_1.png)
+![png](images/output_12_1.png)
 
 
 ## 3. Perspective transform
@@ -711,7 +711,7 @@ for i, test_fname in enumerate(test_images):
 ```
 
 
-![png](output_37_0.png)
+![png](images/output_37_0.png)
 
 
 # Pipeline on video
